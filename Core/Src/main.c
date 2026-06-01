@@ -2,7 +2,14 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
+  * @brief          : 빔 밸런싱 애플리케이션의 메인 프로그램 본체.
+  *
+  * 프로젝트 목적:
+  * - 빔 밸런싱 실험을 위해 거리 관련 센서 데이터를 100Hz로 취득한다.
+  * - 광학 거리 센서를 ADC1 정규 변환으로 측정한다.
+  * - HC-SR04 초음파 센서를 TIM1 입력 캡처로 측정한다.
+  * - SG-90 서보모터를 TIM4 PWM 출력으로 구동한다.
+  * - UART 기반 런타임 모니터링 및 명령 입력 기능을 제공한다.
   ******************************************************************************
   * @attention
   *
@@ -61,7 +68,7 @@ typedef enum
 #define ADC_BUFFER_LENGTH       256U
 #define ADC_SAMPLE_RATE_HZ      100.0f
 /* ADC 입력 용도:
- * - CH0 (PA0, ADC_CHANNEL_0): Optical distance sensor 아날로그 출력(주 측정)
+ * - CH0 (PA0, ADC_CHANNEL_0): 광학 거리 센서 아날로그 출력(주 측정)
  * - CH1 (PA1), CH4 (PA4): 보조/예비 입력
  */
 /* L432-SG90 기준 캘리브레이션 범위/기본값 */
@@ -398,7 +405,7 @@ void SystemClock_Config(void)
 /**
   * @brief ADC1 Initialization Function
   *        - TIM3 TRGO(100Hz) 외부 트리거 기반 3채널 스캔
-  *        - Rank1 CH0(PA0): Optical distance sensor
+  *        - Rank1 CH0(PA0): 광학 거리 센서
   *        - Rank2 CH1(PA1), Rank3 CH4(PA4): 보조/예비 입력
   * @param None
   * @retval None
@@ -437,7 +444,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  /* Rank1: CH0(PA0) = Optical distance sensor */
+  /* Rank1: CH0(PA0) = 광학 거리 센서 */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_112CYCLES;
@@ -472,9 +479,9 @@ static void MX_ADC1_Init(void)
 }
 
 /**
-  * @brief TIM1 Initialization Function (HC-SR04 ECHO 입력 캡처 + 100Hz TRIG 생성)
+  * @brief TIM1 초기화 함수 (HC-SR04 ECHO 입력 캡처 + 100Hz TRIG 생성)
   *        PSC=83 -> 1MHz tick, ARR=9999 -> 10ms 주기(100Hz)
-  *        CH1: Input Capture (PA8, ECHO)
+  *        CH1: 입력 캡처 (PA8, ECHO)
   *        CH2: Output Compare TIMING (인터럽트만, 핀 없음, 10us 후 TRIG LOW)
   * @retval None
   */
@@ -580,7 +587,7 @@ static void MX_TIM3_Init(void)
 }
 
 /**
-  * @brief TIM4 Initialization Function (SG-90 서보 PWM 출력)
+  * @brief TIM4 초기화 함수 (SG-90 서보 PWM 출력)
   *        - CH1(PB6), 50Hz(20ms), 1us tick 기반 펄스폭 제어
   * @param None
   * @retval None
