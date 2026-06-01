@@ -9,10 +9,29 @@
 - 다중 채널 ADC(3채널) + TIM3 외부 트리거 샘플링
 - TIM4 PWM(50Hz) 기반 SG-90 제어
 - UART 명령 인터페이스 기반 모드 선택/런타임 제어
-- **TIM1 Input Capture 기반 HC-SR04 초음파 거리 측정 (100Hz, 인터럽트)**
-- **USART2 RX 인터럽트 + 링버퍼 방식으로 STOP 명령 유실 문제 수정**
+- TIM1 Input Capture 기반 HC-SR04 초음파 거리 측정 (100Hz, 인터럽트)
+- USART2 RX 인터럽트 + 링버퍼 방식으로 STOP 명령 유실 문제 수정
 
-## 시스템 구성도 (발표자료용)
+## 목차
+
+- [1) 문서 목적](#1-문서-목적)
+- [시스템 구성도](#시스템-구성도)
+- [PID 제어 블럭도](#pid-제어-블럭도)
+- [배선도 작성용 연결표](#배선도-작성용-연결표-핵심)
+- [2) 적용 파일](#2-적용-파일)
+- [3) 현재 핵심 기능](#3-현재-핵심-기능)
+- [4) ADC 샘플링 구성](#4-adc-샘플링-구성)
+- [6) Servo PWM 구성](#6-servo-pwm-구성)
+- [7) HC-SR04 초음파 거리 측정](#7-hc-sr04-초음파-거리-측정-tim1-input-capture)
+- [8) UART RX 인터럽트 방식](#8-uart-rx-인터럽트-방식-링버퍼)
+- [9) 런타임 동작 개요](#9-런타임-동작-개요)
+- [10) UART 출력 예시](#10-uart-출력-예시)
+- [11) CubeMX(.ioc) 반영 상태](#11-cubemxioc-반영-상태)
+- [12) 핀맵](#12-핀맵-stm32f411re-nucleo-64)
+- [13) 빌드](#13-빌드)
+- [14) 주의 사항](#14-주의-사항)
+
+## 시스템 구성도 
 
 아래 구성도는 현재 시스템의 센서 입력, 제어 출력, 내부 처리 흐름을 발표자료용으로 단순화해 표현한 것임.
 
@@ -41,6 +60,74 @@ flowchart LR
 - 두 센서 입력은 MCU 내부에서 최신값으로 유지되며, 제어 판단에 사용된다.
 - 제어 출력은 TIM4 PWM을 통해 SG-90 서보모터로 전달된다.
 - UART2는 디버그 출력과 사용자 명령 입력을 담당한다.
+
+## PID 제어 블럭도
+
+아래 블럭도는 현재 프로젝트에서 PID 제어가 실제로 어떤 순서로 동작하는지 요약한 것이다.
+
+```mermaid
+flowchart LR
+  OPT["광학 거리 센서"]
+  US["HC-SR04 초음파 센서"]
+  OPTCM["광학 거리 변환"]
+  USCM["초음파 거리 계산"]
+  OFFSET["중심 오프셋 계산"]
+  SOURCE{입력 소스 선택}
+  MANUAL["POS:<cm> 수동 오프셋"]
+  AUTO["AUTO 센서 기반 오프셋"]
+  SP["SP:<cm> 목표값"]
+  ERR["오차 계산: e[k] = r[k] - y[k]"]
+  PID["PID 연산: P + I + D"]
+  DIR["DIR 부호 반전"]
+  GATE{RUN 상태?}
+  CLAMP["서보 각도 제한 0~180 deg"]
+  PWM["TIM4 PWM"]
+  SERVO["SG-90 서보모터"]
+  UART["UART 명령"]
+
+  OPT --> OPTCM --> OFFSET
+  US --> USCM --> OFFSET
+  UART --> SOURCE
+  SOURCE --> MANUAL --> ERR
+  SOURCE --> AUTO --> ERR
+  OFFSET --> ERR
+  SP --> ERR
+  ERR --> PID --> DIR --> GATE
+  UART --> GATE
+  GATE -- RUN --> CLAMP --> PWM --> SERVO
+  GATE -- STOP --> PWM
+```
+
+PID 구현 흐름:
+- `POS:<cm>` 또는 `AUTO`로 제어에 사용할 현재 오프셋을 선택한다.
+- `SP:<cm>`로 목표 오프셋을 정하고, 오차 $e[k] = r[k] - y[k]$를 계산한다.
+- `KP`, `KI`, `KD`는 각각 비례, 적분, 미분 항의 크기를 조절한다.
+- `DIR:+/-`는 계산된 제어량의 방향을 뒤집거나 유지하는 역할을 한다.
+- `RUN` 상태에서만 10ms 주기로 PID 갱신이 진행되며, `STOP` 상태에서는 출력만 멈춘다.
+- 최종 제어량은 90도 기준에서 더하고 빼서 서보 각도로 바꾸며, 0도~180도 범위로 제한한다.
+- `RESET`은 적분값과 이전 오차를 초기화하여 재시작 시 과도한 누적 영향을 줄인다.
+
+발표용 짧은 요약:
+- 센서에서 현재 중심 오프셋을 구한다.
+- 목표값과의 차이로 오차를 만든다.
+- 오차를 PID(P, I, D)로 보정해서 서보 각도를 계산한다.
+- `RUN`일 때만 보정이 실제 출력되고, `STOP`일 때는 출력만 멈춘다.
+
+이 구조는 코드에서 `GetPidMeasurementOffsetCm()`, `ResetPidController()`, `UpdatePidControl()` 순서로 구현되어 있다.
+
+PID 수식과 코드 대응표:
+
+| 수식/동작 | 의미 | 코드 대응 |
+|---|---|---|
+| $y[k]$ | 현재 중심 오프셋 | `GetPidMeasurementOffsetCm()` |
+| $r[k]$ | 목표 오프셋 | `g_pid.setpoint_cm` |
+| $e[k] = r[k] - y[k]$ | 현재 오차 | `UpdatePidControl()` |
+| $I[k] = I[k-1] + e[k]\Delta t$ | 적분 항 누적 | `g_pid.integral` |
+| $D[k] = \frac{e[k]-e[k-1]}{\Delta t}$ | 미분 항 계산 | `g_pid.prev_error` 와 `UpdatePidControl()` |
+| $u[k] = s\cdot(K_p e[k] + K_i I[k] + K_d D[k])$ | 제어량 계산 | `g_pid.kp`, `g_pid.ki`, `g_pid.kd`, `g_pid.output_direction_sign` |
+| $\theta[k] = \mathrm{clamp}(90 + u[k], 0, 180)$ | 서보 각도 변환 | `SetServoAngleRaw()` |
+| `RUN` / `STOP` | 제어 실행 게이트 | `g_pid.control_enabled` |
+| `RESET` | 적분/이전오차 초기화 | `ResetPidController()` |
 
 ## 배선도 작성용 연결표 (핵심)
 
@@ -87,11 +174,26 @@ flowchart LR
 
 - `1`: ADC 모드
 - `2`: Servo 모드
+- `0`: About 모드
+- `3`: PID 모드
 
 출력 예:
 - `=== Mode Select ===`
+- `0: About      - brief program overview`
 - `1: ADC Mode   - 3ch raw data CSV output`
-- `2: Servo Mode - command interface (A, CMIN, CMAX, STATUS, HELP)`
+- `2: Servo Mode - command interface (A, STOP, CMIN, CMAX, STATUS, HELP)`
+- `3: PID Mode   - offset-based PID position control`
+
+### 3.1 About 모드
+최상위 메뉴에서 `0`을 누르면 프로그램의 간단한 설명이 출력되고, 다시 모드 선택 화면으로 돌아간다.
+
+About 출력 예:
+
+- `BeamBalancing: STM32F411RE beam balance control demo`
+- `ADC mode     : GP2Y0A41SK0F optical distance + HC-SR04 distance`
+- `Servo mode   : SG-90 angle control and calibration`
+- `PID mode     : offset-based PID position control`
+- `Commands     : 0=About, 1=ADC, 2=Servo, 3=PID`
 
 ### 3.2 ADC 모드 명령 인터페이스
 ADC 모드 진입 후 `Input>` 프롬프트에서 아래 명령 지원.
@@ -99,23 +201,108 @@ ADC 모드 진입 후 `Input>` 프롬프트에서 아래 명령 지원.
 - `START`: CSV 스트리밍 출력 활성화
 - `STOP`: CSV 스트리밍 출력 비활성화
 - `STATUS`: ADC 상태 출력
+- `BACK`: 모드 선택 화면으로 복귀
 - `HELP`: 도움말 출력
 
 CSV 출력 형식:
-- `raw0,raw1,raw2`
+- `ch0_raw,optical_cm,ultra_cm`
+
+광학 거리 센서 값은 SHARP GP2Y0A41SK0F의 일반 특성 곡선을 기준으로 ADC 전압을 4~30cm 범위의 거리로 근사 변환한다.
+
+광센서 환산은 다음 순서로 계산한다.
+
+$$
+V_{adc} = \frac{raw}{4095} \cdot V_{ref}
+$$
+
+$$
+d_{opt} = f_{GP2Y0A41SK0F}(V_{adc})
+$$
+
+여기서 $raw$는 ADC 원시값, $V_{ref}$는 기준 전압(이 프로젝트에서는 3.3V), $f_{GP2Y0A41SK0F}$는 데이터시트의 일반 출력 곡선을 구간 선형 보간으로 근사한 함수이다.
+
+이 방식은 센서 출력이 비선형이기 때문에, 단순 직선식보다 실제 거리와 더 가깝게 계산할 수 있다.
 
 ### 3.3 Servo 모드 명령 인터페이스
 Servo 모드 진입 후 `Input>` 프롬프트에서 아래 명령 지원.
 
 - `A<deg>`: 각도 설정(`A0` ~ `A180`)
+- `STOP`: 서보를 중립 각도(`A90`)로 이동
 - `CMIN:<us>`: 0도 펄스폭 설정(`500`~`3000`)
 - `CMAX:<us>`: 180도 펄스폭 설정(`500`~`3000`)
 - `STATUS`: 현재 각도/펄스폭 상태 출력
+- `BACK`: 모드 선택 화면으로 복귀
 - `HELP`: 도움말 출력
 
 서보 초기값:
 - 초기 각도: `90 deg`
 - 기본 캘리브레이션: `CMIN=500us`, `CMAX=2500us`
+
+### 3.4 PID 모드 명령 인터페이스
+PID 모드 진입 후 `PID>` 프롬프트에서 아래 명령 지원.
+
+- `POS:<cm>`: 현재 공의 중심 오프셋을 사용자가 직접 입력
+- `AUTO`: 센서 기반 오프셋을 사용
+- `RUN`: PID 제어 시작
+- `STOP`: PID 제어 정지
+- `SP:<cm>`: 목표 오프셋 설정(기본값 `0`)
+- `KP:<v>`: 비례 게인 변경
+- `KI:<v>`: 적분 게인 변경
+- `KD:<v>`: 미분 게인 변경
+- `DIR+/-` 또는 `DIR:+/-`: 제어 출력 방향 변경
+- `RESET`: 적분/미분 상태 초기화
+- `STATUS`: PID 상태 출력
+- `BACK`: 모드 선택 화면으로 복귀
+- `HELP`: 도움말 출력
+
+PID 제어에서 현재 위치 오차는 공의 중심 오프셋으로 정의한다.
+
+광학 거리 센서를 왼쪽, 초음파 센서를 오른쪽으로 둘 때 측정 오프셋 $y$는 다음과 같다.
+
+$$
+y = \frac{d_{optical} - d_{ultra}}{2}
+$$
+
+사용자가 직접 오프셋을 입력하면 그 값을 그대로 $y$로 사용하고, `AUTO` 모드에서는 센서에서 계산한 $y$를 사용한다.
+
+PID 오차와 제어량은 아래와 같다.
+
+$$
+e[k] = r[k] - y[k]
+$$
+
+$$
+I[k] = I[k-1] + e[k]\Delta t
+$$
+
+$$
+D[k] = \frac{e[k] - e[k-1]}{\Delta t}
+$$
+
+$$
+u[k] = s \cdot \bigl(K_p e[k] + K_i I[k] + K_d D[k]\bigr)
+$$
+
+여기서 $r[k]$는 목표 오프셋이고, $s \in \{+1, -1\}$는 사용자가 설정하는 방향 부호이다. 이 프로젝트의 기본 목표는 $0cm$이다. 제어 출력 $u[k]$는 서보 각도 보정값으로 해석하며, 최종 서보 각도는 다음처럼 계산한다.
+
+$$
+  heta[k] = \mathrm{clamp}(90 + u[k], 0, 180)
+$$
+
+이 구조는 공이 정중앙에 있을 때 서보 기준각을 `90 deg`로 보고, 그 주변으로 상하/좌우 보정하는 방식이다.
+
+예시:
+
+- `POS:3.5`는 공 중심이 가운데보다 `+3.5cm` 왼쪽이라고 가정한 입력이다.
+- `SP:0`은 정중앙 유지 목표를 의미한다.
+- `KP:5.0`, `KI:0.0`, `KD:0.0`은 우선 비례 제어로만 동작시키는 기본 시작점이다.
+- `DIR:+`는 오차가 양수일 때 서보 보정이 +방향으로 가도록 한다.
+- `DIR:-`는 오차가 양수일 때 서보 보정이 -방향으로 가도록 반전한다.
+
+PID 시작 시에는 서보를 중립 각도(`90 deg`)로 맞추고, 이후 10ms 단위로 제어량을 갱신한다.
+PID 모드에 들어가면 처음에는 `STOP` 상태이며, `RUN`을 입력해야 실제 제어가 동작한다.
+`STOP`은 제어 출력을 멈추는 명령이고, `SP`, `KP`, `KI`, `KD`, `DIR`, `POS`, `AUTO`는 정지 상태에서도 수정 가능하다.
+`RUN`을 다시 입력하면 현재 설정값으로 제어를 재개한다.
 
 ## 4) ADC 샘플링 구성
 
@@ -162,6 +349,45 @@ Servo 모드 진입 후 `Input>` 프롬프트에서 아래 명령 지원.
 범위:
 - angle: 0~180
 - CMIN/CMAX: 500~3000us (단, CMIN < CMAX)
+
+### 6.3 두 센서로 공의 중앙 위치 계산
+
+광학 거리 센서와 초음파 센서가 공의 양쪽에서 서로 마주보는 구성이라면, 각 센서는 공의 표면까지의 거리를 읽는다고 볼 수 있다.
+
+왼쪽 센서가 측정한 거리와 오른쪽 센서가 측정한 거리를 각각 $d_L$, $d_R$라고 하자. 두 센서 사이의 가운데를 기준점으로 잡으면, 공 중심의 가운데 기준 오프셋 $\delta$는 다음과 같다.
+
+$$
+\delta = \frac{d_L - d_R}{2}
+$$
+
+의미는 다음과 같다.
+
+- $\delta > 0$이면 공 중심이 왼쪽 센서 쪽으로 치우쳐 있다.
+- $\delta < 0$이면 공 중심이 오른쪽 센서 쪽으로 치우쳐 있다.
+- $\delta = 0$이면 공 중심이 정확히 가운데에 있다.
+
+이 식에서 공의 지름은 직접 들어가지 않는다. 양쪽 센서가 모두 공 표면까지의 거리를 측정하므로, 중심 오프셋을 구할 때 공 반지름 항이 서로 소거되기 때문이다.
+
+센서 사이 전체 거리 $D$를 알고 있고, 가운데가 아니라 왼쪽 센서 기준으로 공 중심 위치 $x$를 구하고 싶다면 다음처럼 쓸 수 있다.
+
+$$
+x = \frac{D + d_L - d_R}{2}
+$$
+
+가운데 기준 오프셋은 결국 $x - \frac{D}{2}$와 같고, 정리하면 다시 $\frac{d_L - d_R}{2}$가 된다.
+
+이 프로젝트에서는 광학 거리 센서를 왼쪽, 초음파 센서를 오른쪽으로 두고 다음 함수를 사용한다.
+
+$$
+\delta = \frac{d_{optical} - d_{ultra}}{2}
+$$
+
+예시:
+
+- 광학 센서가 12cm, 초음파 센서가 18cm이면 $\delta = -3cm$ 이므로 공은 오른쪽으로 3cm 치우쳐 있다.
+- 광학 센서가 20cm, 초음파 센서가 10cm이면 $\delta = +5cm$ 이므로 공은 왼쪽으로 5cm 치우쳐 있다.
+
+코드에서는 이 값을 `center` 또는 `center offset`으로 표시해, 공이 가운데에서 어느 쪽으로 얼마나 벗어났는지 바로 확인할 수 있다.
 
 ## 7) HC-SR04 초음파 거리 측정 (TIM1 Input Capture)
 
@@ -278,9 +504,16 @@ ADC 모드에서 CSV를 연속 출력하는 동안, UART 수신을 폴링(`HAL_U
 9. UART 모드 선택
 
 ### 9.2 메인 루프
-- Servo 모드: UART 명령 처리(`A`, `CMIN`, `CMAX`, `STATUS`, `HELP`)
-- ADC 모드: UART 명령 처리(`START`, `STOP`, `STATUS`, `HELP`) + 큐 pop/CSV 출력
+- Servo 모드: UART 명령 처리(`A`, `STOP`, `CMIN`, `CMAX`, `STATUS`, `HELP`)
+- ADC 모드: UART 명령 처리(`START`, `STOP`, `STATUS`, `BACK`, `HELP`) + 큐 pop/CSV 출력
+- ADC 모드 CSV: CH0 raw, 광학 거리(cm), 초음파 거리(cm)
+- ADC 모드 상태: 광학 거리(cm), 중심 오프셋(cm)
+- PID 모드: `PID>` 명령 처리 + 10ms PID 갱신 + 서보 각도 보정
+- PID 모드: `PID>` 명령 처리 + `RUN/STOP`로 제어 시작/정지 + 10ms PID 갱신 + 서보 각도 보정
+- PID 모드 상태: 기본 `STOP`, `RUN` 시 제어 시작, `STOP` 시 제어 정지
 - HC-SR04 거리 측정: 인터럽트 전용 (메인 루프 비점유), `g_hcsr04_dist_cm` 읽기만 하면 됨
+
+`BACK`을 입력하면 현재 모드를 종료하고 초기 모드 선택 화면으로 돌아간다.
 
 ## 10) UART 출력 예시
 
@@ -454,7 +687,8 @@ Servo 모드 진입 후 `Input>` 프롬프트에서 아래 명령 지원.
 
 ### 7.2 메인 루프
 - Servo 모드: UART 명령 처리(`A`, `CMIN`, `CMAX`, `STATUS`, `HELP`)
-- ADC 모드: UART 명령 처리(`START`, `STOP`, `STATUS`, `HELP`) + 큐 pop/CSV 출력
+- ADC 모드: UART 명령 처리(`START`, `STOP`, `STATUS`, `BACK`, `HELP`) + 큐 pop/CSV 출력
+- PID 모드: `PID>` 명령 처리 + 10ms PID 갱신 + 서보 각도 보정
 
 ## 8) UART 출력 예시
 

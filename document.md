@@ -34,7 +34,7 @@
 
 - `=== Mode Select ===`
 - `1: ADC Mode   - 3ch raw data CSV output`
-- `2: Servo Mode - command interface (A, CMIN, CMAX, STATUS, HELP)`
+- `2: Servo Mode - command interface (A, STOP, CMIN, CMAX, STATUS, HELP)`
 
 선택 이후 메인 루프는 모드별 입력 파서를 사용합니다.
 
@@ -96,6 +96,12 @@ ADC 모드 프롬프트: `Input>`
 - `STATUS`: 현재 상태 출력
 - `HELP`: 도움말 출력
 
+CSV 출력 형식:
+
+- `ch0_raw,optical_cm,ultra_cm`
+
+광학 거리 센서 값은 SHARP GP2Y0A41SK0F의 일반 특성 곡선을 사용해 ADC 전압을 거리(cm)로 근사 변환한다.
+
 상태 예시:
 
 - stream ON/OFF
@@ -150,6 +156,7 @@ Servo 모드 프롬프트: `Input>`
 지원 명령:
 
 - `A<deg>`: 각도 설정 (`A0` ~ `A180`)
+- `STOP`: 서보를 중립 각도(`A90`)로 이동
 - `CMIN:<us>`: 0도 펄스폭 (`500~3000`)
 - `CMAX:<us>`: 180도 펄스폭 (`500~3000`)
 - `STATUS`: 현재 각도/캘리브레이션/현재 펄스폭 출력
