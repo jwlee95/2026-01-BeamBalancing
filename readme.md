@@ -12,6 +12,36 @@
 - **TIM1 Input Capture 기반 HC-SR04 초음파 거리 측정 (100Hz, 인터럽트)**
 - **USART2 RX 인터럽트 + 링버퍼 방식으로 STOP 명령 유실 문제 수정**
 
+## 시스템 구성도 (발표자료용)
+
+아래 구성도는 현재 시스템의 센서 입력, 제어 출력, 내부 처리 흐름을 발표자료용으로 단순화해 표현한 것임.
+
+```mermaid
+flowchart LR
+  OPT[광학 거리 센서\nPA0 / ADC1_IN0\n100Hz 샘플링]
+  HCSR04[HC-SR04 초음파 센서\nTRIG: PA6\nECHO: PA8\n100Hz 측정]
+  ADC[ADC1\n3채널 스캔\nTIM3 TRGO]
+  IC[TIM1 입력 캡처\nECHO 폭 측정]
+  MCU[STM32F411RE\n빔 밸런싱 제어 로직]
+  UART[UART2\n상태 출력 / 명령 입력]
+  PWM[TIM4 PWM\nPB6 / D10\n50Hz]
+  SERVO[SG-90 서보모터\n빔 각도 구동]
+
+  OPT --> ADC
+  HCSR04 --> IC
+  ADC --> MCU
+  IC --> MCU
+  UART <--> MCU
+  MCU --> PWM
+  PWM --> SERVO
+```
+
+구성 요약:
+- 광학 거리 센서는 ADC1로 읽고, 초음파 거리 센서는 TIM1 입력 캡처로 읽는다.
+- 두 센서 입력은 MCU 내부에서 최신값으로 유지되며, 제어 판단에 사용된다.
+- 제어 출력은 TIM4 PWM을 통해 SG-90 서보모터로 전달된다.
+- UART2는 디버그 출력과 사용자 명령 입력을 담당한다.
+
 ## 배선도 작성용 연결표 (핵심)
 
 아래 표를 기준으로 실제 배선도를 작성하면 됩니다.
