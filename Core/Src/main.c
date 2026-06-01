@@ -60,6 +60,10 @@ typedef enum
 #define ADC_CHANNEL_COUNT       3U
 #define ADC_BUFFER_LENGTH       256U
 #define ADC_SAMPLE_RATE_HZ      100.0f
+/* ADC 입력 용도:
+ * - CH0 (PA0, ADC_CHANNEL_0): Optical distance sensor 아날로그 출력(주 측정)
+ * - CH1 (PA1), CH4 (PA4): 보조/예비 입력
+ */
 /* L432-SG90 기준 캘리브레이션 범위/기본값 */
 #define SERVO_CALIB_MIN_US       500U
 #define SERVO_CALIB_MAX_US      3000U
@@ -96,6 +100,8 @@ UART_HandleTypeDef huart2;
 uint32_t g_led_toggle_count = 0U;
 AdcFrameQueue_t g_adc_queue;
 AdcFrame_t g_adc_current_frame;
+/* 최신 ADC 3채널 값 스냅샷(항상 마지막 완성 프레임) */
+volatile uint16_t g_adc_latest_raw[ADC_CHANNEL_COUNT] = {0U, 0U, 0U};
 volatile uint32_t g_adc_total_frames = 0U;
 volatile uint8_t g_adc_rank_index = 0U;
 uint8_t g_adc_stream_enabled = 1U;
@@ -391,6 +397,9 @@ void SystemClock_Config(void)
 
 /**
   * @brief ADC1 Initialization Function
+  *        - TIM3 TRGO(100Hz) 외부 트리거 기반 3채널 스캔
+  *        - Rank1 CH0(PA0): Optical distance sensor
+  *        - Rank2 CH1(PA1), Rank3 CH4(PA4): 보조/예비 입력
   * @param None
   * @retval None
   */
@@ -428,6 +437,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
+  /* Rank1: CH0(PA0) = Optical distance sensor */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_112CYCLES;
@@ -438,6 +448,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
+  /* Rank2: CH1(PA1) = 보조/예비 입력 */
   sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = 2;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
@@ -447,6 +458,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
+  /* Rank3: CH4(PA4) = 보조/예비 입력 */
   sConfig.Channel = ADC_CHANNEL_4;
   sConfig.Rank = 3;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
@@ -460,8 +472,8 @@ static void MX_ADC1_Init(void)
 }
 
 /**
-  * @brief TIM1 Initialization Function (HC-SR04 ECHO 입력 캡처 + 200Hz TRIG 생성)
-  *        PSC=83 -> 1MHz tick, ARR=4999 -> 5ms 주기(200Hz)
+  * @brief TIM1 Initialization Function (HC-SR04 ECHO 입력 캡처 + 100Hz TRIG 생성)
+  *        PSC=83 -> 1MHz tick, ARR=9999 -> 10ms 주기(100Hz)
   *        CH1: Input Capture (PA8, ECHO)
   *        CH2: Output Compare TIMING (인터럽트만, 핀 없음, 10us 후 TRIG LOW)
   * @retval None
@@ -476,7 +488,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance               = TIM1;
   htim1.Init.Prescaler         = 83U;           /* 84MHz / 84 = 1MHz */
   htim1.Init.CounterMode       = TIM_COUNTERMODE_UP;
-  htim1.Init.Period            = HCSR04_TIM_ARR; /* 4999 = 5ms */
+  htim1.Init.Period            = HCSR04_TIM_ARR; /* 9999 = 10ms */
   htim1.Init.ClockDivision     = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0U;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -568,7 +580,8 @@ static void MX_TIM3_Init(void)
 }
 
 /**
-  * @brief TIM4 Initialization Function
+  * @brief TIM4 Initialization Function (SG-90 서보 PWM 출력)
+  *        - CH1(PB6), 50Hz(20ms), 1us tick 기반 펄스폭 제어
   * @param None
   * @retval None
   */
@@ -802,6 +815,12 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
   {
     /* 3채널이 모두 채워지면 1프레임 완성으로 큐에 적재 */
     rank_index = 0U;
+
+    /* 메인 루프/다른 코드에서 즉시 참조할 최신 스냅샷 갱신 */
+    g_adc_latest_raw[0] = g_adc_current_frame.channel[0];
+    g_adc_latest_raw[1] = g_adc_current_frame.channel[1];
+    g_adc_latest_raw[2] = g_adc_current_frame.channel[2];
+
     (void)AdcQueue_Push(&g_adc_queue, &g_adc_current_frame);
     g_adc_total_frames++;
   }

@@ -116,13 +116,15 @@ PA4.Signal=ADCx_IN4
 PA5.GPIOParameters=GPIO_Label
 PA5.GPIO_Label=LD2 [Green Led]
 PA5.Locked=true
-PA5.Signal=GPIO_OutputPA6.GPIOParameters=GPIO_Label
+PA5.Signal=GPIO_Output
+PA6.GPIOParameters=GPIO_Label
 PA6.GPIO_Label=HCSR04_TRIG
 PA6.Signal=GPIO_Output
 PA8.GPIOParameters=GPIO_Label
 PA8.GPIO_Label=HCSR04_ECHO
 PA8.Mode=Input Capture direct mode
-PA8.Signal=S_TIM1_CH1PB3.GPIOParameters=GPIO_Label
+PA8.Signal=S_TIM1_CH1
+PB3.GPIOParameters=GPIO_Label
 PB3.GPIO_Label=SWO
 PB3.Locked=true
 PB3.Signal=SYS_JTDO-SWO

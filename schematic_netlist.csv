@@ -1,0 +1,16 @@
+Net,From_Ref,From_Pin,To_Ref,To_Pin,Note
+GND,U1(STM32_NUCLEO_F411RE),GND,J1(Optical_Sensor),GND,Common ground
+GND,U1(STM32_NUCLEO_F411RE),GND,J2(SG90_Servo),GND,Common ground
+GND,U1(STM32_NUCLEO_F411RE),GND,J3(HC-SR04),GND,Common ground
++3V3,U1(STM32_NUCLEO_F411RE),3V3,J1(Optical_Sensor),VCC,Check sensor VCC spec
++5V_EXT,PWR1(External_5V),+5V,J2(SG90_Servo),VCC,Servo external supply recommended
++5V_EXT,PWR1(External_5V),+5V,J3(HC-SR04),VCC,HC-SR04 typical 5V supply
+ADC0_OPT,U1(STM32_NUCLEO_F411RE),PA0/A0 (ADC1_IN0),J1(Optical_Sensor),AOUT,Main optical distance input
+ADC1_AUX,U1(STM32_NUCLEO_F411RE),PA1/A1 (ADC1_IN1),J4(Optional_Aux_Analog_1),AOUT,Optional auxiliary analog input
+ADC4_AUX,U1(STM32_NUCLEO_F411RE),PA4/A2 (ADC1_IN4),J5(Optional_Aux_Analog_2),AOUT,Optional auxiliary analog input
+SERVO_PWM,U1(STM32_NUCLEO_F411RE),PB6/D10 (TIM4_CH1),J2(SG90_Servo),SIG,SG-90 PWM signal
+HCSR04_TRIG,U1(STM32_NUCLEO_F411RE),PA6/D12,J3(HC-SR04),TRIG,10us trigger pulse
+HCSR04_ECHO_5V,J3(HC-SR04),ECHO,U2(Level_Shifter_or_Divider),IN,Do not connect ECHO directly to MCU 3.3V pin
+HCSR04_ECHO_3V3,U2(Level_Shifter_or_Divider),OUT,U1(STM32_NUCLEO_F411RE),PA8/D7 (TIM1_CH1),TIM1 input capture
+UART_TX,U1(STM32_NUCLEO_F411RE),PA2/D1 (USART2_TX),J6(UART_Debug),RX,Optional debug/command port
+UART_RX,U1(STM32_NUCLEO_F411RE),PA3/D0 (USART2_RX),J6(UART_Debug),TX,Optional debug/command port

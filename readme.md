@@ -12,6 +12,36 @@
 - **TIM1 Input Capture 기반 HC-SR04 초음파 거리 측정 (100Hz, 인터럽트)**
 - **USART2 RX 인터럽트 + 링버퍼 방식으로 STOP 명령 유실 문제 수정**
 
+## 배선도 작성용 연결표 (핵심)
+
+아래 표를 기준으로 실제 배선도를 작성하면 됩니다.
+
+| 대상 | 센서/모듈 핀 | MCU 핀 | 보드 핀명 | 비고 |
+|---|---|---|---|---|
+| Optical distance sensor | AOUT | PA0 (ADC1_IN0, Rank1) | A0 | 주 측정 입력 |
+| Optical distance sensor (옵션) | AOUT2 | PA1 (ADC1_IN1, Rank2) | A1 | 보조 입력 |
+| Optical distance sensor (옵션) | AOUT3 | PA4 (ADC1_IN4, Rank3) | A2 | 보조 입력 |
+| SG-90 서보 | SIG | PB6 (TIM4_CH1) | D10 | PWM 50Hz |
+| HC-SR04 | TRIG | PA6 (GPIO Out) | D12 | 10us 펄스 출력 |
+| HC-SR04 | ECHO | PA8 (TIM1_CH1 Input Capture) | D7 | 입력 캡처 |
+| UART 로그/명령 | TX | PA2 (USART2_TX) | D1 | PC 수신 측 |
+| UART 로그/명령 | RX | PA3 (USART2_RX) | D0 | PC 송신 측 |
+
+배선 전원/접지 규칙:
+- SG-90 VCC는 외부 5V 권장, SG-90 GND와 보드 GND는 반드시 공통 접지
+- HC-SR04 VCC는 5V 사용 가능, HC-SR04 GND와 보드 GND 공통 접지
+- HC-SR04 ECHO(5V)는 PA8(3.3V 입력)에 직접 연결하지 말고 저항 분배기 사용 권장 (예: 1k/2k)
+
+배선도 작성 체크리스트:
+- ADC0(주센서)는 반드시 PA0/A0에 연결
+- SG-90 신호선은 PB6/D10에 연결
+- HC-SR04는 TRIG=D12, ECHO=D7로 분리 연결
+- 모든 모듈의 GND를 단일 공통 GND로 묶기
+
+회로도 툴 작업 파일:
+- `schematic_netlist.csv`: 회로도 툴에 옮겨 그리기 위한 네트 연결표
+- `schematic_parts.md`: 부품 ID/레벨변환/전원 규칙 정리
+
 ## 2) 적용 파일
 - Core/Src/main.c
 - Core/Src/stm32f4xx_hal_msp.c
